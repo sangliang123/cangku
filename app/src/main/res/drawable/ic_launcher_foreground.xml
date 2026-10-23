@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    自适应图标的前景层：把白云的头像（透明背景 PNG）放进安全区。
+    周围各留 20dp：108dp 画布里剩下 68dp，正好落在系统裁切的安全区内，
+    圆形、方形、圆角方形图标都不会切到脸。
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_head"
+    android:inset="20dp" />

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 全局主题：Material 3 浅色，无 ActionBar，背景用浅薄荷色 -->
+    <style name="Theme.BaiYunPet" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/mint_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/mint_100</item>
+        <item name="colorOnPrimaryContainer">@color/ink</item>
+
+        <item name="android:colorBackground">@color/bg_page</item>
+        <item name="android:windowBackground">@color/bg_page</item>
+        <item name="android:statusBarColor">@color/bg_page</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/bg_page</item>
+    </style>
+</resources>

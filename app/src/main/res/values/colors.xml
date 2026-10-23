@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主题色：取自白云的薄荷绿发梢 -->
+    <color name="mint_700">#2F8F80</color>
+    <color name="mint_100">#D9EFEA</color>
+
+    <color name="white">#FFFFFFFF</color>
+    <color name="bg_page">#F5FAF8</color>
+    <color name="surface">#FFFFFFFF</color>
+    <color name="stroke">#E2EFEB</color>
+
+    <color name="ink">#22302E</color>
+    <color name="ink_soft">#6B807C</color>
+
+    <!-- 启动图标的底色 -->
+    <color name="ic_launcher_background">#EAF7F3</color>
+</resources>

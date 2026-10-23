@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用名 -->
+    <string name="app_name">白云</string>
+
+    <!-- 主界面 -->
+    <string name="title">白云桌宠</string>
+    <string name="subtitle">第一步 · 悬浮窗 · 拖拽 · 贴边</string>
+    <string name="label_running_state">运行状态</string>
+    <string name="state_overlay_on">悬浮窗权限：已开启</string>
+    <string name="state_overlay_off">悬浮窗权限：未开启</string>
+    <string name="state_service_on">桌宠服务：运行中</string>
+    <string name="state_service_off">桌宠服务：未启动</string>
+    <string name="state_service_hidden">桌宠服务：已隐藏（点通知栏可恢复）</string>
+    <string name="btn_start">开启桌宠</string>
+    <string name="btn_show">叫白云出来</string>
+    <string name="btn_settings">设置</string>
+    <string name="btn_settings_missing_key">设置（还没填 API Key）</string>
+    <string name="btn_stop">关闭桌宠</string>
+    <string name="btn_permission">去系统设置里授权悬浮窗</string>
+    <string name="footer_hint">开启后白云会出现在屏幕右上角。\n单击她聊两句，双击她会躲起来；按住拖动，松手自动贴边。</string>
+
+    <!-- 悬浮窗与通知 -->
+    <string name="pet_content_description">白云桌宠</string>
+    <string name="notification_title">白云正在陪你</string>
+    <string name="notification_body">按住我可以拖到喜欢的位置，松手会自动贴边</string>
+    <string name="notification_hidden_title">白云躲起来了</string>
+    <string name="notification_hidden_text">点一下通知，把她叫回来</string>
+    <string name="notification_action_open_app">打开 App</string>
+    <string name="notification_channel_name">白云桌宠</string>
+    <string name="notification_channel_desc">白云桌宠的运行状态</string>
+
+    <!-- 厂商白名单引导 -->
+    <string name="whitelist_title">让白云在 %1$s 上活下来</string>
+    <string name="whitelist_message">%1$s\n\n系统可能随时清掉后台的桌宠。开了自启动 / 后台运行，就不用反复叫她出来。</string>
+    <string name="whitelist_steps_xiaomi">小米 / Redmi：设置 → 应用设置 → 授权管理 → 自启动，给白云打勾；再到电池里把「后台限制」设为无限制。</string>
+    <string name="whitelist_steps_huawei">华为 / 荣耀：设置 → 应用 → 应用启动管理 → 白云 → 关掉「自动管理」，手动允许自启动和后台活动。</string>
+    <string name="whitelist_steps_oppo">OPPO / 一加 / realme：设置 → 电池 → 应用耗电管理 → 白云 → 允许后台运行。</string>
+    <string name="whitelist_steps_vivo">vivo / iQOO：设置 → 电池 → 后台耗电管理 → 白云 → 允许后台高耗电。</string>
+    <string name="whitelist_steps_samsung">三星：设置 → 电池 → 后台使用限制 → 白云 → 加入「永不休眠的应用」。</string>
+    <string name="whitelist_go">去设置</string>
+    <string name="whitelist_later">知道了</string>
+    <string name="whitelist_manual">请手动到设置里加白名单</string>
+
+    <!-- 设置页 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_subtitle">改完保存，桌面上的白云会立刻跟着变</string>
+    <string name="settings_api_key">API Key</string>
+    <string name="settings_api_key_hint">sk-…</string>
+    <string name="settings_api_key_tip">只保存在本机（SharedPreferences），不会上传到别处。去 platform.deepseek.com 申请。</string>
+    <string name="settings_test">测试连接</string>
+    <string name="settings_testing">测试中…</string>
+    <string name="settings_test_ok">连接成功：%1$s…</string>
+    <string name="settings_test_fail">连接失败：%1$s</string>
+    <string name="settings_key_empty">先填一个 API Key 再测吧</string>
+    <string name="settings_cloud_size">云朵大小</string>
+    <string name="settings_bubble_alpha">气泡不透明度</string>
+    <string name="settings_preview">气泡预览：透明一点，看得见后面的桌面</string>
+    <string name="settings_save">保存</string>
+    <string name="settings_saved">已保存</string>
+    <string name="settings_size_value">%1$d dp</string>
+    <string name="settings_alpha_value">%1$d%%</string>
+
+    <!-- 聊天气泡 -->
+    <string name="chat_hint">和白云说点什么…</string>
+    <string name="chat_send">发送</string>
+    <!-- 出错时的兜底回复 -->
+    <string name="chat_error_fallback">网络卡了？你这信号是2G考古吗</string>
+    <!-- 401 时的额外提示（Toast） -->
+    <string name="chat_error_auth">API Key 无效或没填，去 DeepSeekChatManager.kt 里改</string>
+</resources>

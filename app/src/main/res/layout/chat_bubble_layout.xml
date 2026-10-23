@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    聊天气泡（独立悬浮窗的根布局）
+    ┌──────────────────────────┐
+    │  RecyclerView（消息列表）  │  最大高 200dp，靠 MaxHeightRecyclerView 限制
+    │  ──────────────────────  │
+    │  [输入框............] [发送]│
+    └──────────────────────────┘
+
+    默认 GONE：服务打开气泡时才设为 VISIBLE 并加进 WindowManager。
+    根节点可获取焦点，是为了能拦截返回键来收起气泡。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bubbleRoot"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_chat_bubble"
+    android:elevation="10dp"
+    android:focusable="true"
+    android:focusableInTouchMode="true"
+    android:padding="10dp"
+    android:visibility="gone">
+
+    <!-- 只有一层 LinearLayout：列表 + 分隔线 + 输入行，不再往下嵌套 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- 消息列表：高度自适应，最多 200dp（像素上限在代码里设置） -->
+        <com.baiyun.pet.MaxHeightRecyclerView
+            android:id="@+id/rvMessages"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:scrollbars="none" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="8dp"
+            android:background="#1FFFFFFF" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/etMessage"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_chat_input"
+                android:hint="@string/chat_hint"
+                android:imeOptions="actionSend"
+                android:importantForAutofill="no"
+                android:inputType="textCapSentences"
+                android:maxLines="1"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:singleLine="true"
+                android:textColor="@color/white"
+                android:textColorHint="#80FFFFFF"
+                android:textSize="14sp" />
+
+            <ImageButton
+                android:id="@+id/btnSend"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_send_button"
+                android:contentDescription="@string/chat_send"
+                android:padding="9dp"
+                android:src="@drawable/ic_send" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

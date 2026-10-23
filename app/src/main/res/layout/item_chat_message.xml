@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    单条消息。默认按「白云（靠左 + 小云朵）」排版，
+    用户消息由 ChatAdapter 在代码里改成靠右、隐藏云朵、换蓝色背景。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rowMessage"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="start"
+    android:orientation="horizontal"
+    android:paddingTop="3dp"
+    android:paddingBottom="3dp">
+
+    <!-- 小云朵图标（复用通知栏那朵云的矢量图，染成薄荷色） -->
+    <ImageView
+        android:id="@+id/ivAvatar"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_gravity="bottom"
+        android:layout_marginEnd="6dp"
+        android:contentDescription="@string/pet_content_description"
+        android:src="@drawable/ic_pet_notification"
+        android:tint="@color/mint_100" />
+
+    <TextView
+        android:id="@+id/tvMessage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_msg_pet"
+        android:lineSpacingExtra="2dp"
+        android:maxWidth="220dp"
+        android:paddingStart="10dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="8dp"
+        android:textColor="@color/white"
+        android:textSize="14sp" />
+</LinearLayout>
