@@ -11,8 +11,8 @@ android {
         applicationId = "com.baiyun.pet"
         minSdk = 24          // 需求：最低 Android 7.0
         targetSdk = 34       // 需求：Android 14
-        versionCode = 6
-        versionName = "0.6.0"
+        versionCode = 12
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -63,5 +63,9 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     // DeepSeek 聊天接口
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 无障碍节点遍历放到 IO 线程
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // 本地 OCR（中文文字识别，离线）
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.0")
     implementation("com.google.code.gson:gson:2.10.1")
 }

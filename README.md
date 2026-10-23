@@ -45,12 +45,21 @@ BaiYunPet/
         │   ├── SettingsActivity.kt     # 设置页
         │   ├── BootReceiver.kt         # 开机自启
         │   ├── ManufacturerHelper.kt   # 厂商白名单引导
+        │   ├── ScreenDetector.kt       # 前台 App 包名识别（UsageStats）
+        │   ├── AppNameMapper.kt        # 包名 → 中文名 + 分类
+        │   ├── BaiyunAccessibilityService.kt  # 无障碍读界面文字
+        │   ├── ScreenContentParser.kt  # 文字 → 小说/游戏/日常/更新
+        │   ├── ScreenCaptureManager.kt # MediaProjection 截屏
+        │   ├── ScreenOcrProcessor.kt   # ML Kit 本地 OCR / 图片压缩
+        │   ├── ScreenContextBuilder.kt # 三源上下文 → prompt 摘要
+        │   ├── ProactiveChatManager.kt # 主动搭话：定时/话术池/防骚扰
         │   ├── ChatAdapter.kt          # 气泡里的消息列表适配器
         │   └── MaxHeightRecyclerView.kt# 支持 maxHeight=200dp 的 RecyclerView
         │
         └── res/
             ├── layout/activity_main.xml
             ├── layout/activity_settings.xml    # 设置页布局
+            ├── xml/accessibilityservice.xml    # 无障碍服务配置
             ├── layout/chat_bubble_layout.xml   # 气泡布局（默认 GONE）
             ├── layout/item_chat_message.xml    # 单条消息
             ├── drawable/bg_chat_bubble.xml     # #CC222222 + 12dp 圆角
@@ -325,7 +334,321 @@ Content-Type: application/json
 
 ---
 
-## 六、怎么跑起来（从新建项目到看到桌宠）
+## 六、第六步新增：前台 App 识别
+
+### 6.1 新增文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `java/com/baiyun/pet/ScreenDetector.kt` | 用 `UsageStatsManager` 拿当前前台包名；查权限、过滤自己、过滤过期记录 |
+| `java/com/baiyun/pet/AppNameMapper.kt` | 包名 → 中文名 + 分类（游戏/阅读/社交/视频/资讯/浏览器/购物），预置 60 个常见 App，未收录返回包名 |
+
+### 6.2 改动文件
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `FloatingPetService.kt` | 每 **10 秒**查一次前台 App；切换时记录包名/名称/时间戳；游戏或阅读类才回调 `onAppChanged`（现在只 `Log.d`） |
+| `MainActivity.kt` | 首次开启桌宠后引导「使用情况访问」权限（只弹一次） |
+| `SettingsActivity.kt` / `activity_settings.xml` | 设置页加「使用情况访问权限」入口，随时可回去重新开 |
+| `SettingsStore.kt` | 新增 `KEY_USAGE_GUIDE` 标记 |
+| `AndroidManifest.xml` | 声明 `PACKAGE_USAGE_STATS`（特殊权限，需用户手动开） |
+| `strings.xml` | 引导文案 |
+
+### 6.3 怎么工作
+
+```
+每 10 秒：
+  ScreenDetector.currentForegroundPackage()   →  com.tencent.tmgp.sgame
+  AppNameMapper.resolve()                     →  "王者荣耀" / GAME
+  和上次比：
+    没变   → 什么都不做
+    变了   → 记 package / 名称 / 时间戳
+           是 GAME 或 READING 才回调 onAppChanged("王者荣耀")
+```
+
+回调接口在服务里：
+
+```kotlin
+var appChangeListener: AppChangeListener = AppChangeListener { appName ->
+    Log.d(TAG, "onAppChanged: $appName")   // 下一步换成让白云说话
+}
+```
+
+### 6.4 隐私
+
+- **只读包名**，不截屏、不读屏幕内容、不读通知；
+- 权限是系统的「使用情况访问」，只能在设置里手动开；
+- 拿不到权限时检测直接跳过，不影响桌宠其它功能。
+
+### 6.5 测试
+
+1. 打开 App → 按提示去「使用情况访问」给白云授权；
+2. `adb logcat -s FloatingPetService`；
+3. 切到王者荣耀/原神/番茄小说，等 10~15 秒，日志应出现：
+   `前台 App 切换：王者荣耀（com.tencent.tmgp.sgame，GAME）` 和 `onAppChanged: 王者荣耀`；
+4. 切到微信，只会出现「前台 App 切换：微信」，**不会**触发 onAppChanged。
+
+> 注意：UsageStats 是系统聚合数据，有 1~5 秒延迟，切 App 后不会立刻响应。
+
+---
+
+## 七、第七步新增：无障碍读屏文字
+
+### 7.1 新增文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `java/com/baiyun/pet/BaiyunAccessibilityService.kt` | 无障碍服务：监听窗口变化，IO 线程遍历节点收文字，去重限流后回调 |
+| `java/com/baiyun/pet/ScreenContentParser.kt` | 规则解析：小说 / 游戏对局 / 日常 / 更新，输出 `ScreenContext` |
+| `res/xml/accessibilityservice.xml` | 无障碍配置：全 App、两类事件、500ms 合并、可读窗口内容 |
+
+### 7.2 改动文件
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `AndroidManifest.xml` | 注册无障碍服务（`BIND_ACCESSIBILITY_SERVICE` 保护） |
+| `FloatingPetService.kt` | 注册监听，把 `ScreenContext` 存进 `currentContext`（下一步聊天用） |
+| `MainActivity.kt` | 首次开启后引导无障碍（只弹一次，和使用情况引导错开） |
+| `SettingsActivity.kt` / `activity_settings.xml` | 设置页加「无障碍服务」入口 |
+| `SettingsStore.kt` | 新增 `KEY_A11Y_GUIDE` |
+| `strings.xml` | 无障碍说明、引导文案 |
+| `app/build.gradle.kts` | 加 `kotlinx-coroutines-android:1.8.1`；版本 0.8.0 |
+
+### 7.3 工作流程
+
+```
+系统事件（窗口切换 / 内容变化）
+   ↓
+BaiyunAccessibilityService.onAccessibilityEvent()
+   ↓ 3 秒内同一界面直接丢弃
+   ↓ 交给 Dispatchers.IO 协程
+遍历节点树（最多 800 个节点 / 20 条文字）
+   ├─ 跳过 EditText、isEditable、isPassword
+   ├─ 只取 TextView / Button 的 text
+   └─ 过滤：长度 2~50、必须含字母（汉字的 isLetter 为 true）、去掉广告词/网址
+   ↓
+ScreenContentParser.parse()
+   ↓ 第 X 章 → NOVEL；胜利/失败/击杀/死亡/匹配 → GAME_MATCH
+   ↓ 签到/领取/奖励 → DAILY；更新/版本/维护 → UPDATE
+   ↓ 其余 → GENERIC
+ScreenContext 回调给 FloatingPetService → currentContext
+```
+
+### 7.4 隐私边界
+
+| 不做 | 做法 |
+| --- | --- |
+| 不读输入框 | `isEditable` / `isPassword` / `EditText` 直接跳过 |
+| 不碰聊天/支付 | 微信、QQ、企业微信、钉钉、支付宝整包跳过（隐私名单） |
+| 不读网页 HTML | 只取 TextView/Button 的可见文字，不解析 WebView 内容 |
+| 不收长文本 | 单条超过 50 字直接丢弃 |
+| 不刷屏 | 同一界面 3 秒内只处理一次，单界面最多 20 条 |
+
+### 7.5 测试
+
+1. 设置 → 无障碍 → 白云屏幕助手 → 打开；
+2. `adb logcat -s BaiyunA11y FloatingPetService`；
+3. 打开一本小说（比如番茄），翻到正文页，日志应出现：
+   `解析：NOVEL / 第 12 章 风起云涌（13 条文字）`
+   以及 `屏幕上下文：NOVEL / 第 12 章 风起云涌 / com.dragon.read`；
+4. 打完一局游戏（或打开战绩页）应出现 `GAME_MATCH`；
+5. 打开微信：整包被隐私名单跳过，日志里不会出现任何聊天内容。
+
+> 注意：部分 App 用 Compose 或自绘控件，可能拿不到文字；无障碍读取也受系统限制，
+> 开启后系统会提示「可读取屏幕内容」，这是该权限的必然行为。
+
+---
+
+## 八、第八步新增：截屏 + OCR（可选模块）
+
+### 8.1 新增文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `java/com/baiyun/pet/ScreenCaptureManager.kt` | MediaProjection + ImageReader + VirtualDisplay，按间隔抓帧，长边压到 1280 |
+| `java/com/baiyun/pet/ScreenOcrProcessor.kt` | 方案 A：ML Kit 中文 OCR（置信度 >0.7）；方案 B：JPEG 压缩 + base64 给云端 |
+
+### 8.2 改动文件
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `DeepSeekChatManager.kt` | 新增 `describeScreenshot(base64, callback)`，OpenAI 兼容的 image_url 请求 |
+| `FloatingPetService.kt` | 截屏生命周期、省电策略、OCR 结果存进 `currentContext` |
+| `SettingsActivity.kt` / `activity_settings.xml` | 开关、识别方式、频率、首次隐私弹窗、录屏授权 |
+| `SettingsStore.kt` | `KEY_CAPTURE_ENABLED / MODE / INTERVAL / PRIVACY` |
+| `AndroidManifest.xml` | `FOREGROUND_SERVICE_MEDIA_PROJECTION`；服务类型加 `mediaProjection` |
+| `app/build.gradle.kts` | `text-recognition-chinese:16.0.0`；版本 0.9.0 |
+
+### 8.3 省电策略（默认关闭）
+
+| 条件 | 行为 |
+| --- | --- |
+| 开关关着 | 完全不截 |
+| 前台不是游戏/阅读 | 不截 |
+| 前台是游戏 | 至少 **10 秒**一帧 |
+| 前台是阅读 | 按设置（3/5/10 秒） |
+| 电量 < 20% | 暂停 |
+| 息屏 | 暂停 |
+| 上一帧还在识别 | 丢新帧，不排队 |
+
+### 8.4 两种识别
+
+- **本地 ML Kit**：离线、免费、不出设备；只取置信度 > 0.7 的行，交给 `ScreenContentParser` 归类。
+- **云端视觉**：短边压到 512、JPEG quality 60、base64 后发给 DeepSeek。
+
+> ⚠️ DeepSeek 公开 API 目前以文本为主，图片请求很可能返回 `400`。
+> 代码用的是 OpenAI 兼容格式，换成任意支持视觉的兼容端点/模型即可复用；
+> 收到错误只会打日志，不会影响桌宠其它功能。
+
+### 8.5 隐私
+
+- 开关默认关闭，首次开启弹说明；
+- 本地模式图片只在内存里，识别完立即 `recycle()`；
+- 云端模式只上传压缩图，不落盘、不写历史；
+- 不截聊天/支付场景（前台判断只放行游戏/阅读）。
+
+### 8.6 测试
+
+1. 先开启桌宠 → 设置 → 打开「白云看屏幕」→ 首次弹隐私说明 → 系统录屏授权；
+2. 打开游戏或小说，等 5~10 秒；
+3. 本地模式日志：`ML Kit 识别到 N 行` + `OCR 上下文：NOVEL / 第 12 章…`；
+4. 云端模式日志：`云端视觉：…`（或 `HTTP 400`，属预期）；
+5. 关掉开关 → 下拉通知栏不应再有"正在截取屏幕"的提示；
+6. 电量低于 20% 或切到微信 → 不再出帧。
+
+> 服务重启后旧授权失效，需要重新开一次开关（系统限制）。
+
+---
+
+## 九、第九步新增：屏幕上下文接入聊天
+
+### 9.1 新增文件
+
+| 文件 | 作用 |
+| --- | --- |
+| `java/com/baiyun/pet/ScreenContextBuilder.kt` | 汇总前台 App + 时长 + 无障碍文字 + OCR/视觉，输出一句话摘要（30 秒缓存） |
+| `java/com/baiyun/pet/ProactiveChatManager.kt` | 主动搭话的触发规则 + 冷却时间，纯逻辑、可在后台线程跑 |
+
+### 9.2 改动文件
+
+| 文件 | 改了什么 |
+| --- | --- |
+| `DeepSeekChatManager.kt` | `buildSystemPrompt()` 每次请求现拼上下文；人设追加"屏幕感知"规则；新增 `sendProactive()` |
+| `FloatingPetService.kt` | 把前台 App / 无障碍 / OCR / 视觉结果喂给 Builder；每 60 秒后台判断一次主动搭话；气泡开着就打字，没开就 Toast |
+| `app/build.gradle.kts` | 版本 1.0.0 |
+
+### 9.3 请求时发生什么
+
+```
+sendMessage("这把队友全是演员")
+   ↓
+buildSystemPrompt()
+   ├─ SYSTEM_PROMPT（人设 + 屏幕感知规则）
+   ├─ [当前屏幕上下文]
+   │    app=王者荣耀 | 时长=47min | 界面文字=失败,匹配中
+   └─ [要求] 根据以上上下文自然吐槽，不要生硬提及"我看到你在玩xx"…
+   ↓
+POST /chat/completions
+```
+
+摘要 30 秒内复用，期间有新数据（切 App / 新界面 / 新 OCR）会提前失效重建。
+没有权限、没有数据时 `buildSummary()` 返回 null，system prompt 就是原始人设，**聊天完全不受影响**。
+
+### 9.4 主动搭话
+
+主动搭话已在第十节重做：定时检查 + 话术池 + 自动展开气泡。
+本节只负责「屏幕上下文 → system prompt」，9.6 的测试也只验证上下文注入。
+
+### 9.5 测试
+
+1. 开启桌宠 + 使用情况访问 + 无障碍（可选截屏）；
+2. 打开游戏，聊天时问"我现在该干嘛"，回复应自然带出你在玩游戏；
+3. 关掉所有权限后正常聊天，确认 prompt 不含上下文、回复不受影响。
+
+---
+
+## 十、第十步新增：主动搭话（看屏精简版）
+
+### 10.1 改动
+
+| 文件 | 新建/修改 | 说明 |
+| --- | --- | --- |
+| `ScreenContextBuilder.kt` | 重写 | 只用 UsageStats + 无障碍文字，输出结构化摘要，30 秒缓存 |
+| `ProactiveChatManager.kt` | 重写 | 定时检查 → 摘要 → 看屏请求 / 话术池兜底；场景匹配 + 防骚扰 |
+| `DeepSeekChatManager.kt` | 修改 | 新增 `sendProactiveWithScreen(summary, sceneHint, cb)`，空回复跳过 |
+| `FloatingPetService.kt` | 修改 | 只传文字列表给 builder；收到非空回复才展开气泡 |
+| `BaiyunAccessibilityService.kt` | 修改 | 限流 3s → 5s，单屏 20 → 10 条 |
+| `SettingsActivity.kt` / 布局 | 修改 | 新增「允许读界面文字」开关 + 隐私说明 |
+| `SettingsStore.kt` | 修改 | `KEY_PROACTIVE_USE_SCREEN_TEXT` |
+
+> 这条链路**不截屏、不 OCR、不调视觉 API**；截屏模块仍在，但属于另一套可选功能，不参与主动搭话。
+
+### 10.2 摘要长什么样
+
+```
+app=原神 | 时长=47min | 界面文字=挑战失败,角色血量12%,剩余时间2:34
+app=微信读书 | 时长=32min | 界面文字=第248章 决战,继续阅读
+app=未知 | 时长=5min | 界面文字=无
+```
+
+- 文字取前 5 条有意义（过滤广告、纯数字、超过 30 字）；
+- 关掉「允许读界面文字」后只剩 `app=… | 时长=… | 界面文字=无`；
+- 摘要只存在内存里，30 秒缓存，不落盘、不留历史。
+
+### 10.3 触发 / 请求流程
+
+```
+每 3 分钟（安静 5 / 话多 1，23:00~07:00 翻倍）
+  → 五个条件（可见/气泡收起/3 分钟没聊/5 分钟没搭话/亮屏）
+  → 取摘要
+     ├─ 有效 → sendProactiveWithScreen(summary, sceneHint)
+     └─ 无效 → 话术池随机一句 + "[主动搭话]" 前缀
+  → 模型回复
+     ├─ 空字符串 → 不弹气泡，本次跳过
+     └─ 非空 → 展开气泡 + 云朵抖三下 + 打字机 + 10 秒后自动收起
+```
+
+系统提示里带 `[主动搭话-看屏模式]` 段落，明确“像朋友瞥了一眼屏幕后吐槽”，并禁止播报数据。
+
+### 10.4 场景匹配（只影响语气，不写死台词）
+
+| 界面文字命中 | 提示 |
+| --- | --- |
+| 失败/阵亡/挑战失败 | 吐槽 + 安慰 |
+| 胜利/通关/完成/五杀 | 傲娇庆祝 |
+| 第 X 章 / 继续阅读 / 下一章 | 催睡 / 催更 |
+| 签到/领取/奖励/每日 | 提醒日常 |
+| 匹配中/等待/排队 | 闲聊 |
+| 游戏时长 > 60min | 休息提醒 |
+| 阅读时长 > 30min | 熬夜警告 |
+| 都没命中 | 基于 App 名随口吐槽 |
+
+### 10.5 设置页
+
+- 「白云主动找你聊」总开关；
+- 频率：安静 5 分钟 / 正常 3 分钟 / 话多 1 分钟；
+- 「允许读界面文字搭话」（关掉只用 App 名）；
+- 「10 秒后自动收起气泡」；
+- 隐私说明：不会读聊天/密码/支付内容。
+
+### 10.6 防骚扰
+
+- 23:00~07:00 间隔翻倍；
+- 连续 3 次发出后 5 分钟没回应 → 暂停 30 分钟；
+- 用户主动发消息 → 全部冷却清零；
+- 模型主动返回空 → 不打扰、也不计入“没理”。
+
+### 10.7 测试
+
+1. 设置 → 打开「白云主动找你聊」，频率「话多」；
+2. 打开一本小说（有“第 X 章”文字）等 1~2 分钟 → 气泡自动弹出、云朵抖动、逐字出现；
+3. 关掉「允许读界面文字」→ 摘要只剩 App 名，回复变成通用吐槽；
+4. 断网 / 清空 Key → 用话术池原句兜底；
+5. 双击隐藏桌宠 / 开着气泡 → 不触发。
+
+---
+
+## 十一、怎么跑起来（从新建项目到看到桌宠）
 
 ### 方式 A（推荐，最稳）：新建项目后把文件覆盖进去
 
@@ -353,6 +676,15 @@ Content-Type: application/json
    | `app/src/main/java/com/baiyun/pet/SettingsActivity.kt` | **新建** |
    | `app/src/main/java/com/baiyun/pet/BootReceiver.kt` | **新建** |
    | `app/src/main/java/com/baiyun/pet/ManufacturerHelper.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/ScreenDetector.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/AppNameMapper.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/BaiyunAccessibilityService.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/ScreenContentParser.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/ScreenCaptureManager.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/ScreenOcrProcessor.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/ScreenContextBuilder.kt` | **新建** |
+   | `app/src/main/java/com/baiyun/pet/ProactiveChatManager.kt` | **新建** |
+   | `app/src/main/res/xml/accessibilityservice.xml` | **新建** |
    | `app/src/main/AndroidManifest.xml` | 覆盖 |
    | `app/src/main/res/layout/activity_main.xml` | 覆盖 |
    | `app/src/main/res/layout/chat_bubble_layout.xml` | **新建** |
@@ -451,7 +783,7 @@ git push origin v0.5.0
 
 ---
 
-## 七、代码里几个关键点（方便你后面继续加功能）
+## 十二、代码里几个关键点（方便你后面继续加功能）
 
 ### 1. 悬浮窗权限（`MainActivity`）
 
@@ -499,7 +831,7 @@ WindowManager.LayoutParams(
 
 ---
 
-## 八、在真机上测试时注意
+## 十三、在真机上测试时注意
 
 | 现象 | 原因 / 解决 |
 | --- | --- |
@@ -512,13 +844,14 @@ WindowManager.LayoutParams(
 
 ---
 
-## 九、下一步（本次刻意没做）
+## 十四、下一步（本次刻意没做）
 
-1. 消息持久化（现在关掉服务就没了）；
-2. 清空对话按钮（`DeepSeekChatManager.reset()` 已经预留好了）；
-3. 待机小动画（呼吸、眨眼）、气泡跟随拖动；
-4. 流式输出（`stream: true`）+ 语音输入；
-5. 保活策略做成开关（有人不喜欢 HIGH 通知）。
+1. 主动搭话的话术池支持云端下发；
+2. 消息持久化（现在关掉服务就没了）；
+3. 清空对话按钮（`DeepSeekChatManager.reset()` 已经预留好了）；
+4. 待机小动画（呼吸、眨眼）、气泡跟随拖动；
+5. 流式输出（`stream: true`）+ 语音输入；
+6. 保活策略做成开关（有人不喜欢 HIGH 通知）。
 
 ---
 

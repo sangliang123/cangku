@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
@@ -96,6 +97,8 @@ class MainActivity : AppCompatActivity() {
         autoStartPetIfNeeded()
         updateUi()
         maybeShowWhitelistGuide()
+        maybeShowUsageAccessGuide()
+        maybeShowAccessibilityGuide()
     }
 
     /**
@@ -120,6 +123,72 @@ class MainActivity : AppCompatActivity() {
                 ManufacturerHelper.showGuideIfNeeded(this)
             }
         }, 500L)
+    }
+
+    /**
+     * 引导「使用情况访问」权限（只弹一次）。
+     * 没有它白云就不知道你切到了哪个 App，但只读包名，不截屏、不读内容。
+     */
+    private fun maybeShowUsageAccessGuide() {
+        if (!Settings.canDrawOverlays(this)) return
+        if (ScreenDetector.hasUsageAccess(this)) return
+        if (!SettingsStore.shouldShowUsageGuide(this)) return
+
+        mainHandler.postDelayed({
+            if (isFinishing || isDestroyed || requestingPermission) return@postDelayed
+            // 用户可能已经在系统设置里开好了
+            if (ScreenDetector.hasUsageAccess(this)) return@postDelayed
+            SettingsStore.markUsageGuideShown(this)
+
+            AlertDialog.Builder(this)
+                .setTitle(R.string.usage_title)
+                .setMessage(R.string.usage_message)
+                .setPositiveButton(R.string.usage_go) { _, _ -> openUsageAccessSettings() }
+                .setNegativeButton(R.string.usage_later, null)
+                .show()
+        }, 900L)
+    }
+
+    /**
+     * 引导开启无障碍服务（只弹一次）。
+     * 如果「使用情况访问」的引导还没处理，就先让位，避免两个对话框叠在一起。
+     */
+    private fun maybeShowAccessibilityGuide() {
+        if (!Settings.canDrawOverlays(this)) return
+        if (BaiyunAccessibilityService.isEnabled(this)) return
+        if (!SettingsStore.shouldShowAccessibilityGuide(this)) return
+        if (!ScreenDetector.hasUsageAccess(this) && SettingsStore.shouldShowUsageGuide(this)) return
+
+        mainHandler.postDelayed({
+            if (isFinishing || isDestroyed || requestingPermission) return@postDelayed
+            if (BaiyunAccessibilityService.isEnabled(this)) return@postDelayed
+            SettingsStore.markAccessibilityGuideShown(this)
+
+            AlertDialog.Builder(this)
+                .setTitle(R.string.a11y_title)
+                .setMessage(R.string.a11y_message)
+                .setPositiveButton(R.string.a11y_go) { _, _ -> openAccessibilitySettings() }
+                .setNegativeButton(R.string.a11y_later, null)
+                .show()
+        }, 1_500L)
+    }
+
+    /** 跳到系统的无障碍服务列表页 */
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.a11y_open_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 跳到系统的「使用情况访问」列表页，让用户给白云授权 */
+    private fun openUsageAccessSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.usage_open_failed, Toast.LENGTH_LONG).show()
+        }
     }
 
     // ---------------------------------------------------------------------

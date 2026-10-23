@@ -1,12 +1,20 @@
 package com.baiyun.pet
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.materialswitch.MaterialSwitch
+import android.widget.RadioButton
+import android.widget.RadioGroup
 
 /**
  * 设置页。
@@ -29,6 +37,27 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var preview: TextView
     private lateinit var btnTest: MaterialButton
     private lateinit var btnSave: MaterialButton
+    private lateinit var btnUsageAccess: MaterialButton
+    private lateinit var btnAccessibility: MaterialButton
+
+    // 截屏感知
+    private lateinit var switchCapture: MaterialSwitch
+    private lateinit var radioGroupMode: RadioGroup
+    private lateinit var radioLocal: RadioButton
+    private lateinit var radioCloud: RadioButton
+    private lateinit var radioGroupInterval: RadioGroup
+    private lateinit var radio3: RadioButton
+    private lateinit var radio5: RadioButton
+    private lateinit var radio10: RadioButton
+
+    // 主动搭话
+    private lateinit var switchProactive: MaterialSwitch
+    private lateinit var switchAutoHide: MaterialSwitch
+    private lateinit var switchScreenText: MaterialSwitch
+    private lateinit var radioGroupProactive: RadioGroup
+    private lateinit var radioQuiet: RadioButton
+    private lateinit var radioNormal: RadioButton
+    private lateinit var radioChatty: RadioButton
 
     /** 防连点：测试请求还没回来时禁用按钮 */
     private var testing = false
@@ -45,6 +74,23 @@ class SettingsActivity : AppCompatActivity() {
         preview = findViewById(R.id.viewBubblePreview)
         btnTest = findViewById(R.id.btnTest)
         btnSave = findViewById(R.id.btnSave)
+        btnUsageAccess = findViewById(R.id.btnUsageAccess)
+        btnAccessibility = findViewById(R.id.btnAccessibility)
+        switchCapture = findViewById(R.id.switchCapture)
+        radioGroupMode = findViewById(R.id.radioGroupMode)
+        radioLocal = findViewById(R.id.radioLocal)
+        radioCloud = findViewById(R.id.radioCloud)
+        radioGroupInterval = findViewById(R.id.radioGroupInterval)
+        radio3 = findViewById(R.id.radio3)
+        radio5 = findViewById(R.id.radio5)
+        radio10 = findViewById(R.id.radio10)
+        switchProactive = findViewById(R.id.switchProactive)
+        switchAutoHide = findViewById(R.id.switchAutoHide)
+        switchScreenText = findViewById(R.id.switchScreenText)
+        radioGroupProactive = findViewById(R.id.radioGroupProactive)
+        radioQuiet = findViewById(R.id.radioQuiet)
+        radioNormal = findViewById(R.id.radioNormal)
+        radioChatty = findViewById(R.id.radioChatty)
 
         // 回显已保存的设置
         etApiKey.setText(SettingsStore.apiKey(this))
@@ -75,6 +121,10 @@ class SettingsActivity : AppCompatActivity() {
         updateCloudSizeLabel()
         updateBubbleAlphaLabel()
 
+        btnUsageAccess.setOnClickListener { openUsageAccessSettings() }
+        btnAccessibility.setOnClickListener { openAccessibilitySettings() }
+        setupCaptureSection()
+        setupProactiveSection()
         btnTest.setOnClickListener { testConnection() }
         btnSave.setOnClickListener { saveAndFinish() }
     }
@@ -98,6 +148,165 @@ class SettingsActivity : AppCompatActivity() {
         tvBubbleAlphaValue.text = getString(R.string.settings_alpha_value, alpha)
         // 预览跟着滑块变，所见即所得
         preview.alpha = alpha / 100f
+    }
+
+    // ---------------------------------------------------------------------
+    // 主动搭话
+    // ---------------------------------------------------------------------
+
+    private fun setupProactiveSection() {
+        switchProactive.isChecked = SettingsStore.proactiveEnabled(this)
+        switchAutoHide.isChecked = SettingsStore.proactiveAutoHide(this)
+        switchScreenText.isChecked = SettingsStore.proactiveUseScreenText(this)
+
+        when (SettingsStore.proactiveFrequency(this)) {
+            SettingsStore.FREQ_QUIET -> radioQuiet.isChecked = true
+            SettingsStore.FREQ_CHATTY -> radioChatty.isChecked = true
+            else -> radioNormal.isChecked = true
+        }
+
+        switchProactive.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setProactiveEnabled(this, checked)
+        }
+
+        switchAutoHide.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setProactiveAutoHide(this, checked)
+        }
+
+        switchScreenText.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setProactiveUseScreenText(this, checked)
+        }
+
+        radioGroupProactive.setOnCheckedChangeListener { _, id ->
+            val frequency = when (id) {
+                R.id.radioQuiet -> SettingsStore.FREQ_QUIET
+                R.id.radioChatty -> SettingsStore.FREQ_CHATTY
+                else -> SettingsStore.FREQ_NORMAL
+            }
+            SettingsStore.setProactiveFrequency(this, frequency)
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // 截屏感知
+    // ---------------------------------------------------------------------
+
+    /** 录屏授权结果：OK 才把 resultData 转给桌宠服务去开 MediaProjection */
+    private val projectionLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val data = result.data
+            if (result.resultCode == Activity.RESULT_OK && data != null &&
+                FloatingPetService.isRunning
+            ) {
+                SettingsStore.setCaptureEnabled(this, true)
+                startService(
+                    Intent(this, FloatingPetService::class.java).apply {
+                        action = FloatingPetService.ACTION_START_CAPTURE
+                        putExtra(
+                            FloatingPetService.EXTRA_CAPTURE_RESULT_CODE,
+                            result.resultCode
+                        )
+                        putExtra(FloatingPetService.EXTRA_CAPTURE_DATA, data)
+                    }
+                )
+                setCaptureSwitchSilently(true)
+            } else {
+                SettingsStore.setCaptureEnabled(this, false)
+                setCaptureSwitchSilently(false)
+                Toast.makeText(this, R.string.capture_denied, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    private fun setupCaptureSection() {
+        switchCapture.isChecked =
+            SettingsStore.captureEnabled(this) && FloatingPetService.isRunning
+
+        if (SettingsStore.captureMode(this) == SettingsStore.CAPTURE_MODE_CLOUD) {
+            radioCloud.isChecked = true
+        } else {
+            radioLocal.isChecked = true
+        }
+
+        when (SettingsStore.captureIntervalSec(this)) {
+            3 -> radio3.isChecked = true
+            10 -> radio10.isChecked = true
+            else -> radio5.isChecked = true
+        }
+
+        switchCapture.setOnCheckedChangeListener { _, checked ->
+            if (checked) requestCapturePermission() else disableCapture()
+        }
+
+        radioGroupMode.setOnCheckedChangeListener { _, id ->
+            SettingsStore.setCaptureMode(
+                this,
+                if (id == R.id.radioCloud) SettingsStore.CAPTURE_MODE_CLOUD
+                else SettingsStore.CAPTURE_MODE_LOCAL
+            )
+        }
+
+        radioGroupInterval.setOnCheckedChangeListener { _, id ->
+            val seconds = when (id) {
+                R.id.radio3 -> 3
+                R.id.radio10 -> 10
+                else -> 5
+            }
+            SettingsStore.setCaptureIntervalSec(this, seconds)
+        }
+    }
+
+    /** 打开开关：先弹隐私说明（首次），再申请录屏授权 */
+    private fun requestCapturePermission() {
+        if (!FloatingPetService.isRunning) {
+            setCaptureSwitchSilently(false)
+            Toast.makeText(this, R.string.capture_need_service, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (SettingsStore.shouldShowCapturePrivacy(this)) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.capture_privacy_title)
+                .setMessage(R.string.capture_privacy_message)
+                .setPositiveButton(R.string.capture_privacy_ok) { _, _ ->
+                    SettingsStore.markCapturePrivacyShown(this)
+                    launchProjection()
+                }
+                .setNegativeButton(R.string.capture_privacy_cancel) { _, _ ->
+                    setCaptureSwitchSilently(false)
+                }
+                .setOnCancelListener { setCaptureSwitchSilently(false) }
+                .show()
+        } else {
+            launchProjection()
+        }
+    }
+
+    private fun launchProjection() {
+        try {
+            projectionLauncher.launch(ScreenCaptureManager.createRequestIntent(this))
+        } catch (e: Exception) {
+            setCaptureSwitchSilently(false)
+            Toast.makeText(this, R.string.capture_denied, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun disableCapture() {
+        SettingsStore.setCaptureEnabled(this, false)
+        if (FloatingPetService.isRunning) {
+            startService(
+                Intent(this, FloatingPetService::class.java)
+                    .setAction(FloatingPetService.ACTION_STOP_CAPTURE)
+            )
+        }
+    }
+
+    /** 程序化改开关时不触发监听，避免递归 */
+    private fun setCaptureSwitchSilently(checked: Boolean) {
+        switchCapture.setOnCheckedChangeListener(null)
+        switchCapture.isChecked = checked
+        switchCapture.setOnCheckedChangeListener { _, c ->
+            if (c) requestCapturePermission() else disableCapture()
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -151,6 +360,24 @@ class SettingsActivity : AppCompatActivity() {
     private fun setTestingUi(running: Boolean) {
         btnTest.isEnabled = !running
         btnTest.setText(if (running) R.string.settings_testing else R.string.settings_test)
+    }
+
+    /** 跳到系统的无障碍服务列表页 */
+    private fun openAccessibilitySettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.a11y_open_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 跳到系统的「使用情况访问」列表页 */
+    private fun openUsageAccessSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.usage_open_failed, Toast.LENGTH_LONG).show()
+        }
     }
 
     // ---------------------------------------------------------------------

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    无障碍服务配置：
+    - 不写 packageNames = 监控所有 App（需求要求）
+    - 只监听窗口切换和内容变化两类事件
+    - feedbackGeneric：不需要震动/播报
+    - notificationTimeout=500ms：系统合并高频事件的间隔
+    - canRetrieveWindowContent：允许读取节点文字（必须）
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_description"
+    android:notificationTimeout="500" />

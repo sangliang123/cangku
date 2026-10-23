@@ -61,6 +61,55 @@
     <string name="settings_size_value">%1$d dp</string>
     <string name="settings_alpha_value">%1$d%%</string>
 
+    <!-- 主动搭话 -->
+    <string name="proactive_title">主动搭话</string>
+    <string name="proactive_enable">白云主动找你聊</string>
+    <string name="proactive_frequency">搭话频率</string>
+    <string name="proactive_quiet">安静（5 分钟）</string>
+    <string name="proactive_normal">正常（2 分钟）</string>
+    <string name="proactive_chatty">话多（1 分钟）</string>
+    <string name="proactive_auto_hide">10 秒后自动收起气泡</string>
+    <string name="proactive_use_text">允许读界面文字搭话</string>
+    <string name="proactive_privacy_note">白云只会知道你在用哪个 App 和界面上的公开文字（如章节名），不会读聊天/密码/支付内容。</string>
+    <string name="proactive_hint">23:00~07:00 自动降频；连续 3 次没理她，会安静 30 分钟。</string>
+
+    <!-- 截屏感知 -->
+    <string name="capture_section_title">截屏感知（可选）</string>
+    <string name="capture_switch">白云看屏幕</string>
+    <string name="capture_switch_desc">只在你打游戏 / 看小说时截屏，用来识别画面里的文字</string>
+    <string name="capture_mode_title">识别方式</string>
+    <string name="capture_mode_local">本地 OCR（离线）</string>
+    <string name="capture_mode_cloud">云端视觉（DeepSeek）</string>
+    <string name="capture_interval_title">截屏频率</string>
+    <string name="capture_interval_3">3 秒</string>
+    <string name="capture_interval_5">5 秒</string>
+    <string name="capture_interval_10">10 秒</string>
+    <string name="capture_hint">打游戏时自动降到 10 秒一帧；电量低于 20% 或切到聊天/桌面时暂停。云端视觉需要联网，DeepSeek 公开 API 目前可能不支持图片。</string>
+    <string name="capture_privacy_title">截屏隐私说明</string>
+    <string name="capture_privacy_message">截屏只用于识别当前画面：\n\n• 本地 OCR：图片只在手机本地处理，不离开设备；\n• 云端视觉：压缩后的图片会发给 DeepSeek 用于理解画面，不会保存，也不会上传到其它服务器。\n\n随时可以在设置里关闭。</string>
+    <string name="capture_privacy_ok">知道了</string>
+    <string name="capture_privacy_cancel">取消</string>
+    <string name="capture_need_service">先开启桌宠，再打开截屏感知</string>
+    <string name="capture_denied">没有拿到录屏授权，截屏没有开启</string>
+
+    <!-- 无障碍服务 -->
+    <string name="accessibility_label">白云屏幕助手</string>
+    <string name="accessibility_description">只读取当前界面的文字（输入框、密码框一律跳过），用来判断你在看小说还是打游戏。</string>
+    <string name="a11y_title">让白云看懂屏幕上的字</string>
+    <string name="a11y_message">开启无障碍服务后，白云能读到当前界面的文字，知道你在读第几章、这局是赢是输。\n\n隐私：只读 TextView 的文字，输入框（密码、聊天）一律跳过，也不解析网页 HTML。\n\n设置 → 无障碍 → 白云屏幕助手 → 打开。</string>
+    <string name="a11y_go">去开启</string>
+    <string name="a11y_later">以后再说</string>
+    <string name="a11y_open_failed">打开无障碍设置失败，请手动到 设置 → 无障碍 里开启</string>
+    <string name="settings_accessibility">无障碍服务（屏幕文字）</string>
+
+    <!-- 屏幕侦测（使用情况访问） -->
+    <string name="usage_title">让白云知道你在玩什么</string>
+    <string name="usage_message">打开「使用情况访问」后，白云才能知道你切到了哪个 App，好在打游戏时吐槽你、看小说时催你睡觉。\n\n她只读取前台应用的包名，不截屏、不读聊天、不读任何内容。\n\n设置 → 使用情况访问 → 白云 → 打开。</string>
+    <string name="usage_go">去开启</string>
+    <string name="usage_later">以后再说</string>
+    <string name="usage_open_failed">打开设置失败，请手动到 设置 → 使用情况访问 里授权</string>
+    <string name="settings_usage_access">使用情况访问权限（屏幕侦测）</string>
+
     <!-- 聊天气泡 -->
     <string name="chat_hint">和白云说点什么…</string>
     <string name="chat_send">发送</string>

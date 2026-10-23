@@ -2,6 +2,7 @@ package com.baiyun.pet
 
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,11 +13,14 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
@@ -72,6 +76,9 @@ class FloatingPetService : Service() {
 
         /** 服务被销毁后，延迟多久自愈重启 */
         private const val RESTART_DELAY_MS = 1000L
+
+        /** 前台 App 检测间隔（需求：10 秒） */
+        private const val SCREEN_POLL_INTERVAL_MS = 10_000L
         private const val NOTIFICATION_ID = 1024
 
         /** 关闭桌宠 */
@@ -79,6 +86,18 @@ class FloatingPetService : Service() {
 
         /** 让躲起来的白云重新出现（通知栏、主界面按钮都会发它） */
         const val ACTION_SHOW = "com.baiyun.pet.action.SHOW"
+
+        /** 截屏相关（MediaProjection 授权结果必须从 Activity 传进来） */
+        const val ACTION_START_CAPTURE = "com.baiyun.pet.action.START_CAPTURE"
+        const val ACTION_STOP_CAPTURE = "com.baiyun.pet.action.STOP_CAPTURE"
+        const val EXTRA_CAPTURE_RESULT_CODE = "extra_capture_result_code"
+        const val EXTRA_CAPTURE_DATA = "extra_capture_data"
+
+        /** 打游戏时降频到 10 秒 */
+        private const val GAME_CAPTURE_INTERVAL_MS = 10_000L
+
+        /** 主动搭话后气泡自动收起的时间 */
+        private const val AUTO_HIDE_DELAY_MS = 10_000L
 
         /** 窗口比形象大一圈，给「上下浮动」动画留出空间，否则会被窗口边缘裁掉 */
         private const val PET_WINDOW_PADDING_DP = 6f
@@ -163,6 +182,54 @@ class FloatingPetService : Service() {
     /** 主动停止（用户点关闭 / 没有权限）时为 true，onDestroy 不再自愈重启 */
     private var suppressRestart = false
 
+    // ---------------- 前台 App 检测 ----------------
+
+    /** 上一次检测到的前台包名，用来判断"切 App 了" */
+    private var lastForegroundPackage: String? = null
+    private var lastAppName: String? = null
+    private var lastAppChangedAt = 0L
+    private var warnedNoUsageAccess = false
+
+    /**
+     * 前台 App 切换回调。
+     * 现在只是 Log.d；下一步接聊天时，把这个实现换成「让白云说一句」即可。
+     */
+    var appChangeListener: AppChangeListener = AppChangeListener { appName ->
+        Log.d(TAG, "onAppChanged: $appName")
+    }
+
+    fun interface AppChangeListener {
+        fun onAppChanged(appName: String)
+    }
+
+    /** 无障碍服务解析出的当前屏幕上下文（供后续聊天拼 prompt 用） */
+    @Volatile
+    var currentContext: ScreenContext? = null
+        private set
+
+    private val screenContextListener = object : BaiyunAccessibilityService.Listener {
+        override fun onScreenContext(context: ScreenContext) {
+            currentContext = context
+            ScreenContextBuilder.updateAccessibility(context.texts)
+            Log.d(
+                TAG,
+                "屏幕上下文：${context.type} / ${context.title} / ${context.packageName}"
+            )
+        }
+    }
+
+    // ---------------- 截屏感知（可选） ----------------
+
+    private var captureManager: ScreenCaptureManager? = null
+
+    /** 上一帧还在识别中，先丢掉新帧，避免堆积 */
+    private var ocrBusy = false
+
+    /** 云端视觉最近一次的画面描述 */
+    @Volatile
+    var lastVisionText: String? = null
+        private set
+
     /** 正在等 DeepSeek 回复（按钮置灰） */
     private var isRequesting = false
 
@@ -215,6 +282,12 @@ class FloatingPetService : Service() {
             when (key) {
                 SettingsStore.KEY_CLOUD_SIZE -> mainHandler.post { applyCloudSize() }
                 SettingsStore.KEY_BUBBLE_ALPHA -> mainHandler.post { applyBubbleAlpha() }
+                SettingsStore.KEY_CAPTURE_INTERVAL -> mainHandler.post {
+                    captureManager?.setInterval(currentCaptureInterval())
+                }
+                SettingsStore.KEY_CAPTURE_ENABLED -> mainHandler.post {
+                    if (!SettingsStore.captureEnabled(this)) stopScreenCapture()
+                }
             }
         }
 
@@ -248,6 +321,68 @@ class FloatingPetService : Service() {
     }
 
     // ---------------------------------------------------------------------
+    // 前台 App 检测
+    // ---------------------------------------------------------------------
+
+    /** 每 10 秒跑一次；放在主线程 Handler 上，跟随服务生命周期 */
+    private val screenPollRunnable = object : Runnable {
+        override fun run() {
+            detectForegroundApp()
+            mainHandler.postDelayed(this, SCREEN_POLL_INTERVAL_MS)
+        }
+    }
+
+    private fun startScreenDetection() {
+        mainHandler.removeCallbacks(screenPollRunnable)
+        mainHandler.postDelayed(screenPollRunnable, SCREEN_POLL_INTERVAL_MS)
+    }
+
+    private fun stopScreenDetection() {
+        mainHandler.removeCallbacks(screenPollRunnable)
+    }
+
+    /**
+     * 查一次前台 App。
+     * - 没权限：安静跳过（只提醒一次日志），用户授权后下一次轮询自动生效；
+     * - 包名没变：什么都不做；
+     * - 变了：记下名字/时间戳，游戏或阅读类才回调 onAppChanged。
+     */
+    private fun detectForegroundApp() {
+        if (!ScreenDetector.hasUsageAccess(this)) {
+            if (!warnedNoUsageAccess) {
+                warnedNoUsageAccess = true
+                Log.w(TAG, "没有「使用情况访问」权限，前台 App 检测暂停")
+            }
+            return
+        }
+        warnedNoUsageAccess = false
+
+        val packageName = ScreenDetector.currentForegroundPackage(this) ?: return
+        if (packageName == lastForegroundPackage) return
+
+        val info = AppNameMapper.resolve(packageName)
+        lastForegroundPackage = packageName
+        lastAppName = info.displayName
+        lastAppChangedAt = System.currentTimeMillis()
+        ScreenContextBuilder.updateForeground(
+            packageName = packageName,
+            appName = info.displayName,
+            category = info.category,
+            changedAt = lastAppChangedAt
+        )
+        Log.d(TAG, "前台 App 切换：${info.displayName}（$packageName，${info.category}）")
+
+        if (info.category == AppNameMapper.Category.GAME ||
+            info.category == AppNameMapper.Category.READING
+        ) {
+            appChangeListener.onAppChanged(info.displayName)
+        }
+
+        // 切到游戏降频、切回来恢复
+        captureManager?.setInterval(currentCaptureInterval())
+    }
+
+    // ---------------------------------------------------------------------
     // 生命周期
     // ---------------------------------------------------------------------
 
@@ -262,6 +397,12 @@ class FloatingPetService : Service() {
         bubbleAlphaPercent = SettingsStore.bubbleAlpha(this)
         // 聊天管理器需要 Context 才能读 API Key
         DeepSeekChatManager.init(this)
+
+        // 服务重启后旧的 MediaProjection 授权已经失效，需要用户重新授权
+        if (SettingsStore.captureEnabled(this)) {
+            SettingsStore.setCaptureEnabled(this, false)
+            Log.d(TAG, "截屏授权已失效，等待用户重新开启")
+        }
 
         createNotificationChannel()
         // 必须先成为前台服务，否则 Android 8.0+ 会直接把服务杀掉
@@ -281,6 +422,10 @@ class FloatingPetService : Service() {
 
         showPet()
         isRunning = true
+
+        startScreenDetection()
+        startProactive()
+        BaiyunAccessibilityService.addListener(screenContextListener)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -289,6 +434,26 @@ class FloatingPetService : Service() {
                 suppressRestart = true
                 stopSelf()
                 return START_NOT_STICKY
+            }
+
+            ACTION_START_CAPTURE -> {
+                val resultCode = intent.getIntExtra(
+                    EXTRA_CAPTURE_RESULT_CODE,
+                    Activity.RESULT_CANCELED
+                )
+                val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_CAPTURE_DATA, Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(EXTRA_CAPTURE_DATA)
+                }
+                if (data != null) startScreenCapture(resultCode, data)
+                return START_STICKY
+            }
+
+            ACTION_STOP_CAPTURE -> {
+                stopScreenCapture()
+                return START_STICKY
             }
 
             ACTION_SHOW -> {
@@ -323,6 +488,11 @@ class FloatingPetService : Service() {
     override fun onDestroy() {
         isRunning = false
         isPetHidden = false
+        stopProactive()
+        cancelAutoHide()
+        stopScreenCapture()
+        BaiyunAccessibilityService.removeListener(screenContextListener)
+        stopScreenDetection()
         stopFloating()
         finishTyping()
         snapAnimator?.cancel()
@@ -378,6 +548,234 @@ class FloatingPetService : Service() {
                 Log.w(TAG, "自愈重启失败（可能被后台启动限制）", e)
             }
         }, RESTART_DELAY_MS)
+    }
+
+    // ---------------------------------------------------------------------
+    // 主动搭话
+    // ---------------------------------------------------------------------
+
+    private val proactiveListener = object : ProactiveChatManager.Listener {
+        override fun onProactiveReply(text: String) {
+            mainHandler.post {
+                if (!isBubbleOpen) openBubble()
+                shakePet()
+                typeOutReply(text)
+                scheduleAutoHide()
+            }
+        }
+
+        override fun onProactiveError(fallbackLine: String) {
+            mainHandler.post {
+                if (!isBubbleOpen) openBubble()
+                shakePet()
+                typeOutReply(fallbackLine)
+                scheduleAutoHide()
+            }
+        }
+    }
+
+    /** 主动搭话后 10 秒没人理就自动收起气泡（可在设置里关） */
+    private val autoHideRunnable = object : Runnable {
+        override fun run() {
+            if (!isBubbleOpen) return
+            if (isTyping) {
+                mainHandler.postDelayed(this, 2_000L)
+                return
+            }
+            closeBubble()
+        }
+    }
+
+    private fun scheduleAutoHide() {
+        if (!SettingsStore.proactiveAutoHide(this)) return
+        mainHandler.removeCallbacks(autoHideRunnable)
+        mainHandler.postDelayed(autoHideRunnable, AUTO_HIDE_DELAY_MS)
+    }
+
+    private fun cancelAutoHide() {
+        mainHandler.removeCallbacks(autoHideRunnable)
+    }
+
+    /** 云朵左右抖三下（±8°，每下 100ms） */
+    private fun shakePet() {
+        val view = petView ?: return
+        ObjectAnimator.ofFloat(view, "rotation", 0f, 8f, -8f, 8f, -8f, 8f, 0f).apply {
+            duration = 600L
+            start()
+        }
+    }
+
+    private fun startProactive() {
+        ProactiveChatManager.instance.start(
+            context = this,
+            stateProvider = {
+                ProactiveChatManager.State(
+                    visible = !isPetHidden && petContainer != null,
+                    bubbleOpen = isBubbleOpen,
+                    interactive = getSystemService(PowerManager::class.java)?.isInteractive == true,
+                    category = lastForegroundPackage?.let {
+                        AppNameMapper.resolve(it).category
+                    } ?: AppNameMapper.Category.OTHER
+                )
+            },
+            listener = proactiveListener
+        )
+    }
+
+    private fun stopProactive() {
+        ProactiveChatManager.instance.stop()
+    }
+
+    // ---------------------------------------------------------------------
+    // 截屏感知
+    // ---------------------------------------------------------------------
+
+    /**
+     * 启动截屏。
+     * Android 14 要求应用有 mediaProjection 类型的前台服务，所以先升级 FGS 类型再创建投影。
+     */
+    private fun startScreenCapture(resultCode: Int, data: Intent) {
+        stopScreenCapture()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "升级前台服务类型失败", e)
+            }
+        }
+
+        val manager = ScreenCaptureManager(
+            context = applicationContext,
+            canCapture = { shouldCaptureFrame() },
+            onFrame = { bitmap -> handleCapturedFrame(bitmap) },
+            onStopped = {
+                // 用户在通知栏停掉了投屏
+                mainHandler.post {
+                    captureManager = null
+                    SettingsStore.setCaptureEnabled(this, false)
+                    Log.d(TAG, "投屏被用户停止，截屏已关闭")
+                }
+            }
+        )
+
+        if (!manager.start(resultCode, data)) {
+            Log.w(TAG, "截屏启动失败")
+            SettingsStore.setCaptureEnabled(this, false)
+            return
+        }
+
+        manager.setInterval(currentCaptureInterval())
+        captureManager = manager
+        SettingsStore.setCaptureEnabled(this, true)
+    }
+
+    private fun stopScreenCapture() {
+        val manager = captureManager ?: return
+        captureManager = null
+        ocrBusy = false
+        manager.stop()
+
+        // 恢复成普通前台服务，避免一直占着 mediaProjection 类型
+        if (isRunning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "恢复前台服务类型失败", e)
+            }
+        }
+    }
+
+    /** 是否该截这一帧：开关、亮屏、电量、前台 App 类型 */
+    private fun shouldCaptureFrame(): Boolean {
+        if (!SettingsStore.captureEnabled(this)) return false
+
+        val power = getSystemService(PowerManager::class.java)
+        if (power != null && !power.isInteractive) return false
+
+        if (isBatteryLow()) return false
+
+        val packageName = lastForegroundPackage ?: return false
+        val category = AppNameMapper.resolve(packageName).category
+        return category == AppNameMapper.Category.GAME ||
+            category == AppNameMapper.Category.READING
+    }
+
+    /** 电量低于 20% 自动暂停 */
+    private fun isBatteryLow(): Boolean {
+        val battery = getSystemService(BatteryManager::class.java) ?: return false
+        val level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        return level in 0..19
+    }
+
+    /** 打游戏时至少 10 秒一帧，其它情况按设置 */
+    private fun currentCaptureInterval(): Long {
+        val base = SettingsStore.captureIntervalMs(this)
+        val isGame = AppNameMapper.resolve(lastForegroundPackage ?: "").category ==
+            AppNameMapper.Category.GAME
+        return if (isGame) maxOf(base, GAME_CAPTURE_INTERVAL_MS) else base
+    }
+
+    /** 拿到一帧：按设置走本地 OCR 或云端视觉 */
+    private fun handleCapturedFrame(bitmap: Bitmap) {
+        if (ocrBusy) {
+            bitmap.recycle()
+            return
+        }
+        ocrBusy = true
+
+        if (SettingsStore.captureMode(this) == SettingsStore.CAPTURE_MODE_CLOUD) {
+            // 压缩后 bitmap 会被回收（内部处理）
+            val base64 = ScreenOcrProcessor.encodeJpegBase64(bitmap)
+            DeepSeekChatManager.describeScreenshot(base64, object : DeepSeekChatManager.Callback {
+                override fun onReply(text: String) {
+                    ocrBusy = false
+                    lastVisionText = text
+                    Log.d(TAG, "云端视觉：$text")
+                }
+
+                override fun onError(msg: String) {
+                    ocrBusy = false
+                    Log.w(TAG, "云端视觉失败：$msg")
+                }
+            })
+            return
+        }
+
+        ScreenOcrProcessor.recognize(
+            bitmap = bitmap,
+            onResult = { lines ->
+                bitmap.recycle()
+                ocrBusy = false
+                applyOcrText(lines)
+            },
+            onError = { msg ->
+                bitmap.recycle()
+                ocrBusy = false
+                Log.w(TAG, "OCR 失败：$msg")
+            }
+        )
+    }
+
+    /** 本地 OCR 的文字走一遍规则解析，存进 currentContext */
+    private fun applyOcrText(lines: List<String>) {
+        if (lines.isEmpty()) return
+        val context = ScreenContentParser.parse(
+            packageName = lastForegroundPackage ?: "unknown",
+            activityName = null,
+            texts = lines
+        )
+        currentContext = context
+        Log.d(TAG, "OCR 上下文：${context.type} / ${context.title}")
     }
 
     // ---------------------------------------------------------------------
@@ -724,6 +1122,11 @@ class FloatingPetService : Service() {
         // 加进窗口前先缩到 0，否则第一帧会以原始尺寸闪一下
         view.scaleX = 0f
         view.scaleY = 0f
+        view.setOnTouchListener { _, _ ->
+            // 用户碰了气泡，就别自动收了
+            cancelAutoHide()
+            false
+        }
         bindBubbleViews(view)
 
         val widthPx = dpToPx(BUBBLE_WIDTH_DP)
@@ -800,6 +1203,7 @@ class FloatingPetService : Service() {
     /** 关闭气泡（带 120ms 收拢动画，动画结束后才真正移除窗口） */
     private fun closeBubble() {
         if (!isBubbleOpen) return
+        cancelAutoHide()
         isBubbleOpen = false
         stopFloating()
         finishTyping()
@@ -873,6 +1277,8 @@ class FloatingPetService : Service() {
 
         editText.setText("")
         appendMessage(Message(text, isUser = true))
+        cancelAutoHide()
+        ProactiveChatManager.instance.notifyUserMessage()
 
         isRequesting = true
         setSendEnabled(false)
