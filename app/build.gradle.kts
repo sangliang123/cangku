@@ -11,15 +11,32 @@ android {
         applicationId = "com.baiyun.pet"
         minSdk = 24          // 需求：最低 Android 7.0
         targetSdk = 34       // 需求：Android 14
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // 固定签名：本地和 CI 用同一把 key，版本更新才能直接覆盖安装、保留设置。
+    // 这是自用签名（密码也在仓库里），别拿去上架应用商店。
+    signingConfigs {
+        create("fixed") {
+            storeFile = rootProject.file("keystore/baiyun-release.p12")
+            storePassword = "baiyunpet2024"
+            keyAlias = "baiyun"
+            keyPassword = "baiyunpet2024"
+            storeType = "PKCS12"
+        }
+    }
+
     buildTypes {
+        debug {
+            // 关键：debug 包也用固定签名，否则 CI 每次都换新 key，装不上旧版本
+            signingConfig = signingConfigs.getByName("fixed")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("fixed")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

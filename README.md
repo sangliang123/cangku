@@ -439,7 +439,9 @@ git push origin v0.5.0
 
 **说明**
 
-- 用的是 **debug 签名**，个人自用完全够；要上架商店才需要自己生成 release keystore；
+- **固定签名**：仓库里带了一个自用签名 `keystore/baiyun-release.p12`（密码在 `app/build.gradle.kts`），
+  CI 和本地都用它签名，所以新版本可以直接覆盖安装、保留设置。
+  这个 key 是公开的，只适合自用；要上架商店请换成自己私有的 release keystore；
 - 不需要 `gradle-wrapper.jar`：workflow 里直接安装 Gradle 8.7 构建，绕开这个坑；
 - 私有仓库每月有 2000 分钟免费额度，一次构建约 3~5 分钟；公开仓库免费无限量；
 - 如果 Actions 页看不到 workflow，通常是 `.github/` 没被提交（有些解压工具会隐藏/丢弃点文件），
