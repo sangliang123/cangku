@@ -37,13 +37,19 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept licenses and install SDK 34
+      # 不用 android-actions/setup-android@v3：它内部会装已被废弃的 tools 包，
+      # 在最新的 ubuntu runner 上会直接失败。这里直接用 runner 预装的 SDK。
+      - name: Install Android SDK 34
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT" -name sdkmanager -type f | head -n 1)"
+          fi
+          echo "sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          echo "sdk.dir=$SDK_ROOT" > local.properties
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
